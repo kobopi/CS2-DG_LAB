@@ -1,7 +1,7 @@
 import asyncio
 import io
 import math
-
+import wx
 import qrcode
 from aiohttp import web
 from pydglab_ws import (
@@ -64,9 +64,10 @@ def print_qrcode(data: str):
     )
     qr.add_data(data)
     f = io.StringIO()
-    qr.print_ascii(out=f)
-    f.seek(0)
-    print(f.read())
+    img = qr.make_image(fill_color="black", back_color="white")
+    img_path = "temp_qrcode.png"
+    img.save(img_path)
+
 
 
 health = 100
@@ -217,14 +218,8 @@ async def main():
                 print(f"App 触发了反馈按钮：{data.name}")
 
                 if data == FeedbackButton.A1:
-                    # 设置强度到 A 通道上限
-                    print("对方按下了 A 通道圆圈按钮，加大力度")
-                    if last_strength:
-                        await client.set_strength(
-                            Channel.A,
-                            StrengthOperationType.SET_TO,
-                            last_strength.a_limit,
-                        )
+                    # 之后这边要写逻辑
+                    print("按下 A1")
 
             # 接收 心跳 / App 断开通知
             elif data == RetCode.CLIENT_DISCONNECTED:
