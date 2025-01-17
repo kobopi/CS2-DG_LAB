@@ -147,9 +147,8 @@ async def main():
         client = server.new_local_client()
 
         url = client.get_qrcode(ip_path)
-        print("请用 DG-Lab App 扫描二维码以连接")
+        print("请用 DG-Lab App 扫描文件夹中二维码以连接")
         print_qrcode(url)
-
         # 等待绑定
         await client.bind()
         print(f"已与 App {client.target_id} 成功绑定")
