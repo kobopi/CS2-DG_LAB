@@ -1,5 +1,6 @@
 import asyncio
 import io
+import json
 import math
 import wx
 import qrcode
@@ -13,47 +14,11 @@ from pydglab_ws import (
     StrengthData,
 )
 
-PULSE_DATA = {
-    "死亡": [
-        ((10, 10, 10, 10), (100, 100, 100, 100)),
-        ((10, 10, 10, 10), (100, 100, 100, 100)),
-        ((10, 10, 10, 10), (100, 100, 100, 100)),
-        ((10, 10, 10, 10), (100, 100, 100, 100)),
-        ((10, 10, 10, 10), (100, 100, 100, 100)),
-        ((10, 10, 10, 10), (100, 100, 100, 100)),
-        ((10, 10, 10, 10), (100, 100, 100, 100)),
-        ((10, 10, 10, 10), (100, 100, 100, 100)),
-    ],
-    "受伤": [
-        ((10, 10, 10, 10), (0, 0, 0, 0)),
-        ((10, 10, 10, 10), (0, 5, 10, 20)),
-        ((10, 10, 10, 10), (20, 25, 30, 40)),
-        ((10, 10, 10, 10), (40, 45, 50, 60)),
-        ((10, 10, 10, 10), (60, 65, 70, 80)),
-        ((10, 10, 10, 10), (100, 100, 100, 100)),
-    ],
-    "烧伤": [
-        ((10, 10, 10, 10), (20, 25, 30, 40)),
-        ((10, 10, 10, 10), (40, 45, 50, 60)),
-        ((10, 10, 10, 10), (100, 100, 100, 100)),
-        ((10, 10, 10, 10), (40, 45, 50, 60)),
-        ((10, 10, 10, 10), (20, 25, 30, 40)),
-    ],
-    "傻瓜蛋": [
-        ((10, 10, 10, 10), (100, 100, 100, 100)),
-        ((10, 10, 10, 10), (100, 100, 100, 100)),
-        ((10, 10, 10, 10), (100, 100, 100, 100)),
-    ],
-    "烟雾弹": [
-        ((10, 10, 10, 10), (0, 5, 10, 20)),
-        ((10, 10, 10, 10), (20, 25, 30, 40)),
-        ((10, 10, 10, 10), (40, 45, 50, 60)),
-        ((10, 10, 10, 10), (20, 25, 30, 40)),
-        ((10, 10, 10, 10), (0, 5, 10, 20)),
-    ],
-}
-
-
+# 读取 PULSE_DATA 从 JSON 文件
+with open('config.json', 'r', encoding='utf-8') as file:
+    config = json.load(file)
+    PULSE_DATA = config['pulse_data']
+    ip_path = config['ip_path']
 def print_qrcode(data: str):
     """输出二维码到终端界面"""
     qr = qrcode.QRCode(
@@ -130,13 +95,11 @@ async def handle_post_request(request):
                     health = 100
                     waveform_data = {"type": "pluse", "data": PULSE_DATA["死亡"]}
                     await queue.put(waveform_data)
-                    print("玩家死亡")
                     await asyncio.sleep(5)
                     waveform_data = {"type": "strlse", "data": 100}
                     await queue.put(waveform_data)
                 # 游戏结束重置强度
                 if data["map"]["phase"] == "gameover":
-                    print("游戏结束")
                     waveform_data = {"type": "strlse", "data": 100}
                     await queue.put(waveform_data)
                 return web.json_response({"status": "success", "message": "数据已接收"})
@@ -150,7 +113,6 @@ async def send_waveform_on_queue_change(queue, client):
         waveform_data = await queue.get()
         types = waveform_data["type"]
         data = waveform_data["data"]
-        print(types)
         if types == "pluse":
             await client.add_pulses(Channel.A, *(data * 1))
             await client.add_pulses(Channel.B, *(data * 1))
@@ -184,7 +146,7 @@ async def main():
     async with DGLabWSServer("0.0.0.0", 5678, 60) as server:
         client = server.new_local_client()
 
-        url = client.get_qrcode("ws://192.168.0.150:5678")
+        url = client.get_qrcode(ip_path)
         print("请用 DG-Lab App 扫描二维码以连接")
         print_qrcode(url)
 
