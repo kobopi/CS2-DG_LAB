@@ -13,7 +13,7 @@ from pydglab_ws import (
     StrengthOperationType,
     StrengthData,
 )
-
+#逻辑层更新
 # 读取 PULSE_DATA 从 JSON 文件
 with open('config.json', 'r', encoding='utf-8') as file:
     config = json.load(file)
