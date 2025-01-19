@@ -24,6 +24,7 @@ from multiprocessing import Process, Queue
 with open("config.json", "r", encoding="utf-8") as file:
     config = json.load(file)
     PULSE_DATA = config["pulse_data"]
+    HIT = config["hit"]
 
 
 def get_ip_address():
@@ -36,20 +37,52 @@ def get_ip_address():
     return ip_address
 
 
-def get_cs2_path():
+csi = None
+def script_load():
+    global csi_path
+
     try:
-        key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Valve\Steam")
-        steam_path = winreg.QueryValueEx(key, "SteamPath")[0]
-        print("已找到 Steam 安装路径: " + steam_path)
+        key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, 'Software\Valve\Steam', 0, winreg.KEY_READ)
+        path, _ = winreg.QueryValueEx(key, 'SteamPath')
         winreg.CloseKey(key)
-        cs2_path = steam_path + r"\steamapps\common\Counter-Strike Global Offensive"
-        return cs2_path
-    except FileNotFoundError:
-        print("未找到 Steam 注册表项")
+    except:
         return None
-    except Exception as e:
-        print(f"读取注册表时发生错误: {e}")
-        return None
+
+    libpath = path + '/steamapps/libraryfolders.vdf'
+
+    with open(libpath, 'r') as libvdf:
+        library = libvdf.readlines()
+        last_path = None
+        found = False
+
+        for line in library:
+            pair = line.strip('\n').strip('\t')
+            if pair.startswith('"path"'):
+                _, v = pair.split('\t\t')
+                last_path = v.strip('"').encode().decode('unicode_escape')
+            elif '"730"' in pair:
+                found = True
+                break
+
+        if found and os.path.exists(last_path + '\\steamapps\\common\\Counter-Strike Global Offensive\\'):
+            csi_path = last_path + '\\steamapps\\common\\Counter-Strike Global Offensive\\'
+        print(f"已找到 CS2 安装路径: {csi_path}")
+
+
+# def get_cs2_path():
+#     try:
+#         key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Valve\steam")
+#         steam_path = winreg.QueryValueEx(key, "SteamPath")[0]
+#         print("已找到 Steam 安装路径: " + steam_path)
+#         winreg.CloseKey(key)
+#         cs2_path = steam_path + r"\steamapps\common\Counter-Strike Global Offensive"
+#         return cs2_path
+#     except FileNotFoundError:
+#         print("未找到 Steam 注册表项")
+#         return None
+#     except Exception as e:
+#         print(f"读取注册表时发生错误: {e}")
+#         return None
 
 
 def auto_set_cfg():
@@ -75,20 +108,17 @@ def auto_set_cfg():
 }
 """
     try:
-        path = get_cs2_path() + "\\game\\csgo\\cfg"
-        if os.path.exists(path):
-            with open(path + "\\gamestate_integration_cs2&dglab.cfg", "w") as f:
-                f.write(cfg)
-        else:
-            os.makedirs(path)
-            with open(path + "\\gamestate_integration_cs2&dglab.cfg", "w") as f:
-                f.write(cfg)
-        return True
+        script_load()
+        if os.path.exists(csi_path + 'csgo\\cfg'):
+            with open(csi_path + 'csgo\\cfg\\gamestate_integration_nodecs2.cfg', 'w') as fd:
+                fd.write(cfg)
+
+        if os.path.exists(csi_path + 'game\\csgo\\cfg'):
+            with open(csi_path + 'game\\csgo\\cfg\\gamestate_integration_nodecs2.cfg', 'w') as fd:
+                fd.write(cfg)
     except Exception as e:
         print(f"写入文件时发生错误: {e}")
         return False
-
-
 def print_qrcode(data: str):
     """输出二维码到终端界面"""
     qr = qrcode.QRCode(
@@ -103,6 +133,19 @@ def print_qrcode(data: str):
     img_path = "temp_qrcode1.png"
     img.save(img_path)
     return img_path
+
+
+def read_config():
+    try:
+        with open('config.json', 'r', encoding='utf-8') as file:
+            config_data = json.load(file)
+            # 处理config_data，例如打印每个字段的信息
+            for key, value in config_data.items():
+                print(f"{key}: {value}")
+    except FileNotFoundError:
+        print("config.json文件未找到")
+    except json.JSONDecodeError:
+        print("config.json文件格式错误")
 
 
 health = 100
@@ -129,8 +172,8 @@ async def handle_post_request(request):
                 somke = data["player"]["state"]["smoked"]
                 # 血量减少（调整强度，发送波形）
                 if now_health < health:
-                    data_a = math.ceil((100 - now_health) / 100 * max_strength_A)
-                    data_b = math.ceil((100 - now_health) / 100 * max_strength_B)
+                    data_a = math.ceil((100 - now_health) / 100 * max_strength_A*(HIT/100))
+                    data_b = math.ceil((100 - now_health) / 100 * max_strength_B*(HIT/100))
                     print(f"玩家生命值减少: {health} -> {now_health}")
                     # 这里多写一层判断，判断是否被烧伤
                     if data["player"]["state"]["burning"] > 0:
@@ -162,13 +205,13 @@ async def handle_post_request(request):
                     await queue.put(waveform_data)
                 # 血量归零以及回合结束重置强度以及血量
                 if now_health == 0:
-                    health = 100
                     waveform_data = {"type": "pluse", "data": PULSE_DATA["死亡"]}
                     await queue.put(waveform_data)
                     await asyncio.sleep(5)
                     waveform_data = {"type": "strlse", "data": 100}
                     await queue.put(waveform_data)
-                if "round" in data :
+                    health = 100
+                if "round" in data:
                     if data["round"]["phase"] == "over":
                         waveform_data = {"type": "strlse", "data": 100}
                         await queue.put(waveform_data)
@@ -282,27 +325,43 @@ async def main():
 
 
 def start_gui(strength_A, strength_B, gui_queue):
+    # 声明 hit_field 为全局变量
+    global hit_field
+
+    def update_hit_field():
+        try:
+            with open('config.json', 'r', encoding='utf-8') as file:
+                config_data = json.load(file)
+                hit_value = config_data.get('hit', '')
+                # 这里使用全局变量 hit_field
+                hit_field.delete(1.0, tk.END)
+                hit_field.insert(tk.END, hit_value)
+        except Exception as e:
+            print(f"读取 config.json 出错: {e}")
+
+    def save_hit_field():
+        try:
+            with open('config.json', 'r+', encoding='utf-8') as file:
+                config_data = json.load(file)
+                new_hit_value = hit_field.get(1.0, tk.END).strip()
+                config_data['hit'] = new_hit_value
+                file.seek(0)
+                json.dump(config_data, file, indent=4)
+                file.truncate()
+        except Exception as e:
+            print(f"保存 config.json 出错: {e}")
+
     root = tk.Tk()
     root.title("CS2&郊狼")
     root.geometry("400x400")  # 设置窗口大小
-
-    # 创建侧边栏框架
     sidebar_frame = tk.Frame(root, width=200, bg='light grey')
     sidebar_frame.grid(row=0, column=0, sticky="nsew")
-
-    # 侧边栏中的显示数据按钮
     data_button = tk.Button(sidebar_frame, text="显示数据", bd=0, anchor=tk.W)
     data_button.pack(pady=10, padx=10, fill=tk.X)
-
-    # 侧边栏中的事件按钮
-    event_button = tk.Button(sidebar_frame, text="功能", bd=0, anchor=tk.W)
+    event_button = tk.Button(sidebar_frame, text="功能", bd=0, anchor=tk.W, command=lambda: create_hit_textbox())
     event_button.pack(pady=10, padx=10, fill=tk.X)
-
-    # 创建主内容区框架
     main_frame = tk.Frame(root)
     main_frame.grid(row=0, column=1, sticky="nsew")
-
-    # 配置网格权重，使主内容区可以扩展
     root.grid_rowconfigure(0, weight=5)
     root.grid_columnconfigure(1, weight=1)
 
@@ -323,6 +382,7 @@ def start_gui(strength_A, strength_B, gui_queue):
             pass
         root.after(100, update_strength_labels)
 
+
     def show_qrcode():
         img_path = "temp_qrcode1.png"
         img = Image.open(img_path)
@@ -338,12 +398,29 @@ def start_gui(strength_A, strength_B, gui_queue):
             qrcode_label.pack()
             show_qrcode.qrcode_label = qrcode_label
 
+
     # 显示二维码的按钮
     qrcode_button = tk.Button(main_frame, text="显示二维码", command=show_qrcode)
     qrcode_button.pack()
 
+
+    def create_hit_textbox():
+        hit_frame = tk.Frame(main_frame)
+        hit_frame.pack(pady=10)
+        hit_label = tk.Label(hit_frame, text="血量强度衰减（原为100%）:")
+        hit_label.pack(side=tk.TOP)
+        # 定义 hit_field 为全局变量
+        global hit_field
+        hit_field = tk.Text(hit_frame, height=5, width=30)
+        hit_field.pack(side=tk.TOP)
+        update_hit_field()
+        save_button = tk.Button(hit_frame, text="保存", command=save_hit_field)
+        save_button.pack(side=tk.TOP)
+
+
     update_strength_labels()
     root.mainloop()
+
 
 if __name__ == "__main__":
     asyncio.run(main())
