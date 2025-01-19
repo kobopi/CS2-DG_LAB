@@ -24,7 +24,7 @@ from multiprocessing import Process, Queue
 with open("config.json", "r", encoding="utf-8") as file:
     config = json.load(file)
     PULSE_DATA = config["pulse_data"]
-    HIT = config["hit"]
+    HIT = int(config["hit"])
 
 
 def get_ip_address():
@@ -270,7 +270,6 @@ async def main():
         url = client.get_qrcode(ip_path)
         print("请用 DG-Lab App 扫描二维码以连接")
         print_qrcode(url)
-
         # 创建进程间通信的队列
         gui_queue = Queue()
         # 启动GUI进程
@@ -290,8 +289,6 @@ async def main():
         queue_monitor_task = asyncio.create_task(
             send_waveform_on_queue_change(queue, client)
         )
-
-        last_strength = None
 
         async for data in client.data_generator():
             # 接收通道强度数据
@@ -358,9 +355,9 @@ def start_gui(strength_A, strength_B, gui_queue):
     root.geometry("400x400")  # 设置窗口大小
     sidebar_frame = tk.Frame(root, width=200, bg='light grey')
     sidebar_frame.grid(row=0, column=0, sticky="nsew")
-    data_button = tk.Button(sidebar_frame, text="显示数据", bd=0, anchor=tk.W)
+    data_button = tk.Button(sidebar_frame, text="显示数据", bd=0, anchor=tk.W, command=lambda: show_section('data'))
     data_button.pack(pady=10, padx=10, fill=tk.X)
-    event_button = tk.Button(sidebar_frame, text="功能", bd=0, anchor=tk.W, command=lambda: create_hit_textbox())
+    event_button = tk.Button(sidebar_frame, text="功能", bd=0, anchor=tk.W, command=lambda: show_section('hit'))
     event_button.pack(pady=10, padx=10, fill=tk.X)
     main_frame = tk.Frame(root)
     main_frame.grid(row=0, column=1, sticky="nsew")
@@ -384,7 +381,6 @@ def start_gui(strength_A, strength_B, gui_queue):
             pass
         root.after(100, update_strength_labels)
 
-
     def show_qrcode():
         img_path = "temp_qrcode1.png"
         img = Image.open(img_path)
@@ -394,35 +390,63 @@ def start_gui(strength_A, strength_B, gui_queue):
         if hasattr(show_qrcode, 'qrcode_label'):
             show_qrcode.qrcode_label.config(image=img)
             show_qrcode.qrcode_label.image = img
+            show_qrcode.qrcode_label.pack()  # 确保标签显示
         else:
             qrcode_label = tk.Label(main_frame, image=img)
             qrcode_label.image = img
             qrcode_label.pack()
             show_qrcode.qrcode_label = qrcode_label
 
-
     # 显示二维码的按钮
     qrcode_button = tk.Button(main_frame, text="显示二维码", command=show_qrcode)
     qrcode_button.pack()
 
-
     def create_hit_textbox():
-        hit_frame = tk.Frame(main_frame)
-        hit_frame.pack(pady=10)
-        hit_label = tk.Label(hit_frame, text="血量强度衰减（原为100%）:")
-        hit_label.pack(side=tk.TOP)
-        # 定义 hit_field 为全局变量
-        global hit_field
-        hit_field = tk.Text(hit_frame, height=5, width=30)
-        hit_field.pack(side=tk.TOP)
-        update_hit_field()
-        save_button = tk.Button(hit_frame, text="保存", command=save_hit_field)
-        save_button.pack(side=tk.TOP)
+        if hasattr(create_hit_textbox, 'hit_frame'):
+            # 如果存在，显示现有的输入框
+            create_hit_textbox.hit_frame.pack(pady=10)
+        else:
+            # 否则创建新的输入框
+            hit_frame = tk.Frame(main_frame)
+            hit_frame.pack(pady=10)
+            
+            create_hit_textbox.hit_frame = hit_frame
 
+            hit_label = tk.Label(hit_frame, text="血量强度衰减（原为100%）:")
+            hit_label.pack(side=tk.TOP)
+
+            global hit_field
+            hit_field = tk.Text(hit_frame, height=5, width=30)
+            hit_field.pack(side=tk.TOP)
+            update_hit_field()
+
+            save_button = tk.Button(hit_frame, text="保存", command=save_hit_field)
+            save_button.pack(side=tk.TOP)
+
+    def show_section(section):
+        # 隐藏所有组件
+        strength_a_label.pack_forget()
+        strength_b_label.pack_forget()
+        qrcode_button.pack_forget()
+        if hasattr(create_hit_textbox, 'hit_frame'):
+            create_hit_textbox.hit_frame.pack_forget()
+        if hasattr(show_qrcode, 'qrcode_label'):
+            show_qrcode.qrcode_label.pack_forget()
+
+        if section == 'data':
+            # 显示通道强度和二维码按钮
+            strength_a_label.pack()
+            strength_b_label.pack()
+            qrcode_button.pack()
+            show_qrcode()  # 显示二维码
+        elif section == 'hit':
+            # 显示血量强度衰减选项
+            create_hit_textbox()
 
     update_strength_labels()
     root.mainloop()
 
-
 if __name__ == "__main__":
+    import multiprocessing
+    multiprocessing.freeze_support()
     asyncio.run(main())
