@@ -345,6 +345,8 @@ def start_gui(strength_A, strength_B, gui_queue):
                 config_data = json.load(file)
                 new_hit_value = hit_field.get(1.0, tk.END).strip()
                 config_data['hit'] = new_hit_value
+                global HIT
+                HIT = new_hit_value
                 file.seek(0)
                 json.dump(config_data, file, indent=4)
                 file.truncate()
