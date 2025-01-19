@@ -390,5 +390,9 @@
         ]
     },
     "ip_path": "ws://192.168.0.150:5678",
-    "hit": "10"
+    "hit": "100",
+    "is_smoke": 1,
+    "is_brush": 1,
+    "is_flash": 1,
+    "is_dead": 1
 }
