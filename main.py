@@ -7,6 +7,8 @@ import socket
 from aiohttp import web
 import winreg
 import os
+import pyaudio
+import numpy as np
 from pydglab_ws import (
     FeedbackButton,
     Channel,
@@ -19,14 +21,35 @@ import tkinter as tk
 from PIL import Image, ImageTk
 from multiprocessing import Process, Queue
 
+FORMAT = pyaudio.paInt16
+CHANNELS = 1
+RATE = 44100 
+CHUNK = 1024 
+
+audio = pyaudio.PyAudio()
+stream = audio.open(format=FORMAT, channels=CHANNELS, rate=RATE, input=True, frames_per_buffer=CHUNK)
 
 # 读取 PULSE_DATA 从 JSON 文件
 with open("config.json", "r", encoding="utf-8") as file:
     config = json.load(file)
     PULSE_DATA = config["pulse_data"]
     HIT = int(config["hit"])
-
-
+    is_voice = config["is_voice"]
+    voice_A = config["voice_A"]
+    voice_B = config["voice_B"]
+volume_scaled = 0
+def get_voice():
+    try:
+        while True:
+            global volume_scaled
+            data = stream.read(CHUNK)
+            numpy_data = np.frombuffer(data, dtype=np.int16)
+            normalized_data = numpy_data / 32768.0
+            volume = np.linalg.norm(normalized_data) / np.sqrt(len(normalized_data))
+            volume_scaled = int(volume * 100)
+            return volume_scaled
+    except KeyboardInterrupt:
+        print("程序已退出。")
 def get_ip_address():
     """获取本机IP地址"""
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -67,22 +90,6 @@ def script_load():
         if found and os.path.exists(last_path + '\\steamapps\\common\\Counter-Strike Global Offensive\\'):
             csi_path = last_path + '\\steamapps\\common\\Counter-Strike Global Offensive\\'
         print(f"已找到 CS2 安装路径: {csi_path}")
-
-
-# def get_cs2_path():
-#     try:
-#         key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Valve\steam")
-#         steam_path = winreg.QueryValueEx(key, "SteamPath")[0]
-#         print("已找到 Steam 安装路径: " + steam_path)
-#         winreg.CloseKey(key)
-#         cs2_path = steam_path + r"\steamapps\common\Counter-Strike Global Offensive"
-#         return cs2_path
-#     except FileNotFoundError:
-#         print("未找到 Steam 注册表项")
-#         return None
-#     except Exception as e:
-#         print(f"读取注册表时发生错误: {e}")
-#         return None
 
 
 def auto_set_cfg():
@@ -157,6 +164,13 @@ strenghth_B = 0
 
 async def handle_post_request(request):
     global health
+    global  HIT
+    with open('config.json', 'r', encoding='utf-8') as file:
+        config = json.load(file)
+        ans = int(config["hit"])/100
+        voice_A = config["voice_A"]
+        voice_B = config["voice_B"]
+    dead_flag = False
     queue = request.app["queue"]  # 从app中获取queue
     """处理cs数据请求请求"""
     try:
@@ -170,11 +184,19 @@ async def handle_post_request(request):
                 now_health = data["player"]["state"]["health"]
                 flash = data["player"]["state"]["flashed"]
                 somke = data["player"]["state"]["smoked"]
+                if is_voice == 1:
+                        now_voice_A = int(get_voice()+(max_strength_A*voice_A/100))
+                        now_voice_B = int(get_voice()+(max_strength_B*voice_B/100))
+                        waveform_data = {"type": "strlst", "data": now_voice_A, "chose": "a"}
+                        await queue.put(waveform_data)
+                        waveform_data = {"type": "strlst", "data": now_voice_B, "chose": "b"}
+                        await queue.put(waveform_data)
                 # 血量减少（调整强度，发送波形）
                 if now_health < health:
-                    data_a = math.ceil((100 - now_health) / 100 * max_strength_A*(HIT/100))
-                    data_b = math.ceil((100 - now_health) / 100 * max_strength_B*(HIT/100))
-                    print(f"玩家生命值减少: {health} -> {now_health}")
+                    data_a = math.ceil((100 - now_health) / 100 * max_strength_A)
+                    data_b = math.ceil((100 - now_health) / 100 * max_strength_B)
+                    data_a = math.ceil(data_a * ans)
+                    data_b = math.ceil(data_b * ans)
                     # 这里多写一层判断，判断是否被烧伤
                     if data["player"]["state"]["burning"] > 0:
                         waveform_data = {"type": "pluse", "data": PULSE_DATA["烧伤"]}
@@ -183,18 +205,19 @@ async def handle_post_request(request):
                         waveform_data = {"type": "pluse", "data": PULSE_DATA["受伤"]}
                         await queue.put(waveform_data)
                     # 强度
-                    waveform_data = {
-                        "type": "strlup",
-                        "data": strenghth_A - data_a,
-                        "chose": "a",
-                    }
-                    await queue.put(waveform_data)
-                    waveform_data = {
-                        "type": "strlup",
-                        "data": strenghth_B - data_b,
-                        "chose": "b",
-                    }
-                    await queue.put(waveform_data)
+                    if is_voice == 0:
+                        waveform_data = {
+                            "type": "strlup",
+                            "data": strenghth_A - data_a,
+                            "chose": "a",
+                        }
+                        await queue.put(waveform_data)
+                        waveform_data = {
+                            "type": "strlup",
+                            "data": strenghth_B - data_b,
+                            "chose": "b",
+                        }
+                        await queue.put(waveform_data)
                     health = now_health
                 # 傻瓜蛋！
                 if flash > 0:
@@ -207,9 +230,10 @@ async def handle_post_request(request):
                 if now_health == 0:
                     waveform_data = {"type": "pluse", "data": PULSE_DATA["死亡"]}
                     await queue.put(waveform_data)
-                    await asyncio.sleep(5)
+                    await asyncio.sleep(1)
                     waveform_data = {"type": "strlse", "data": 100}
                     await queue.put(waveform_data)
+                    await asyncio.sleep(3)
                     health = 100
                 if "round" in data:
                     if data["round"]["phase"] == "over":
@@ -247,8 +271,15 @@ async def send_waveform_on_queue_change(queue, client):
             await client.set_strength(Channel.A, StrengthOperationType.DECREASE, 200)
             await client.set_strength(Channel.B, StrengthOperationType.DECREASE, 200)
         elif types == "strlst":
-            await client.set_strength(Channel.A, StrengthOperationType.SET_TO, data)
-            await client.set_strength(Channel.B, StrengthOperationType.SET_TO, data)
+            chose = waveform_data["chose"]
+            if chose == "a":
+                await client.set_strength(
+                    Channel.A, StrengthOperationType.SET_TO, data
+                )
+            if chose == "b":
+                await client.set_strength(
+                    Channel.B, StrengthOperationType.SET_TO, data
+                )
         else:
             print("接收到未知类型数据，请检查")
 
@@ -342,8 +373,6 @@ def start_gui(strength_A, strength_B, gui_queue):
                 config_data = json.load(file)
                 new_hit_value = hit_field.get(1.0, tk.END).strip()
                 config_data['hit'] = new_hit_value
-                global HIT
-                HIT = new_hit_value
                 file.seek(0)
                 json.dump(config_data, file, indent=4)
                 file.truncate()
@@ -411,12 +440,10 @@ def start_gui(strength_A, strength_B, gui_queue):
             hit_frame.pack(pady=10)
             
             create_hit_textbox.hit_frame = hit_frame
-
-            hit_label = tk.Label(hit_frame, text="血量强度衰减（原为100%）:")
+            hit_label = tk.Label(hit_frame, text="血量实时强度百分比:（原为100%）")
             hit_label.pack(side=tk.TOP)
-
             global hit_field
-            hit_field = tk.Text(hit_frame, height=5, width=30)
+            hit_field = tk.Text(hit_frame, height=1, width=5)
             hit_field.pack(side=tk.TOP)
             update_hit_field()
 
